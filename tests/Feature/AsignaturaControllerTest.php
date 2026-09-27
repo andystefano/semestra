@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\GenerarPlanificacion;
 use App\DiaSemana;
 use App\Models\Asignatura;
 use App\Models\User;
@@ -519,6 +520,13 @@ class AsignaturaControllerTest extends TestCase
             ->assertSee('6')
             ->assertSee('5')
             ->assertSee('Presentación de inicio y evaluación diagnóstica')
+            ->assertSeeInOrder([
+                'Primer día completo',
+                'Clases unidad 1.',
+                'Evaluación de 60 minutos.',
+                'Clases unidad 2.',
+                'Evaluación de 60 minutos. El día completo queda bloqueado',
+            ])
             ->assertSee('02/03/2026')
             ->assertSee('Evaluación de 60 minutos')
             ->assertSee('Unidad 2')
@@ -569,6 +577,148 @@ class AsignaturaControllerTest extends TestCase
             ->assertJsonPath('message', 'Primero procesa el archivo PDF.');
     }
 
+    public function test_activities_page_offers_plan_generation_until_one_exists(): void
+    {
+        $user = User::factory()->create();
+        $asignatura = Asignatura::factory()->for($user)->create();
+
+        $this->actingAs($user)
+            ->get(route('asignaturas.actividades', $asignatura))
+            ->assertOk()
+            ->assertSee('Generar Planificación')
+            ->assertDontSee('Generar de nuevo');
+
+        $asignatura->update(['planificacion' => ['calendario' => []]]);
+
+        $this->actingAs($user)
+            ->get(route('asignaturas.actividades', $asignatura))
+            ->assertSee('Ver planificación');
+    }
+
+    public function test_plan_places_classes_and_evaluations_then_contents(): void
+    {
+        $user = User::factory()->create();
+        $asignatura = Asignatura::factory()->for($user)->create([
+            'fecha_inicio' => '2026-03-02',
+            'fecha_termino' => '2026-04-20',
+            'unidades' => [
+                'cantidad' => 2,
+                'unidades' => [
+                    [
+                        'nombre' => 'Orígenes',
+                        'horas_sugeridas' => 2,
+                        'aprendizaje_esperado' => 'Explica el origen',
+                        'criterios_evaluacion' => ['Fundamenta con fuentes'],
+                        'contenidos_obligatorios' => ['Línea de tiempo', 'Fuentes históricas'],
+                        'tipo_habilidad' => 'Análisis',
+                        'competencias_personales_sociales_valoricas' => 'Trabajo colaborativo',
+                    ],
+                    [
+                        'nombre' => 'República',
+                        'horas_sugeridas' => 2,
+                        'aprendizaje_esperado' => 'Describe la república',
+                        'criterios_evaluacion' => ['Ordena hechos'],
+                        'contenidos_obligatorios' => ['Constitución'],
+                        'tipo_habilidad' => 'Comprensión',
+                        'competencias_personales_sociales_valoricas' => 'Respeto',
+                    ],
+                ],
+            ],
+        ]);
+
+        foreach (['2026-03-02', '2026-03-09', '2026-03-16', '2026-03-23', '2026-03-30', '2026-04-06', '2026-04-13', '2026-04-20'] as $numero => $fecha) {
+            $asignatura->clases()->create([
+                'numero' => $numero + 1,
+                'fecha' => $fecha,
+                'hora_inicio' => '08:00',
+                'hora_termino' => '09:30',
+                'sin_clase' => false,
+            ]);
+        }
+
+        $this->actingAs($user)
+            ->postJson(route('asignaturas.actividades.generar', $asignatura))
+            ->assertOk()
+            ->assertJsonPath('url', route('asignaturas.planificacion', $asignatura));
+
+        $calendario = collect($asignatura->refresh()->planificacion['calendario'])->keyBy('fecha');
+
+        $this->assertSame('Presentación de inicio y evaluación diagnóstica', $calendario['2026-03-02']['bloques'][0]['descripcion']);
+        $this->assertSame(['CLASE'], collect($calendario['2026-03-02']['bloques'])->pluck('tipo')->all());
+
+        foreach ($calendario as $jornada) {
+            $tipos = collect($jornada['bloques'])->pluck('tipo');
+            $primeraClase = $tipos->search('CLASE');
+            $primeraEvaluacion = $tipos->search('EVALUACION');
+
+            $this->assertLessThanOrEqual(1, $tipos->filter(fn (string $tipo): bool => $tipo === 'CLASE')->count());
+            $this->assertFalse($primeraClase !== false && $primeraEvaluacion !== false && $primeraClase < $primeraEvaluacion);
+        }
+
+        $claseUnidad1 = collect($calendario['2026-03-09']['bloques'])->firstWhere('tipo', 'CLASE');
+        $this->assertSame(1, $claseUnidad1['unidad']);
+        $this->assertSame('Explica el origen', $claseUnidad1['aprendizaje_esperado']);
+        $this->assertEqualsCanonicalizing(
+            ['Línea de tiempo', 'Fuentes históricas'],
+            collect($calendario['2026-03-09']['bloques'])
+                ->merge($calendario['2026-03-16']['bloques'])
+                ->where('tipo', 'CLASE')
+                ->where('unidad', 1)
+                ->flatMap(fn (array $bloque): array => $bloque['contenidos_obligatorios'])
+                ->pluck('nombre')
+                ->unique()
+                ->values()
+                ->all(),
+        );
+        $this->assertFalse(collect($calendario['2026-03-23']['bloques'])->where('tipo', 'CLASE')->pluck('unidad')->contains(1));
+        $this->assertSame('EVALUACION', $calendario['2026-03-23']['bloques'][0]['tipo']);
+        $this->assertSame(1, $calendario['2026-03-23']['bloques'][0]['unidad']);
+        $this->assertSame('CLASE', $calendario['2026-03-23']['bloques'][1]['tipo']);
+        $this->assertSame(2, $calendario['2026-03-23']['bloques'][1]['unidad']);
+        $this->assertSame('Constitución', $calendario['2026-03-23']['bloques'][1]['contenidos_obligatorios'][0]['nombre']);
+        $this->assertSame('EVALUACION', $calendario['2026-03-30']['bloques'][0]['tipo']);
+        $this->assertFalse(collect($calendario['2026-03-30']['bloques'])->contains(fn (array $bloque): bool => $bloque['tipo'] === 'CLASE'));
+
+        $asignatura->clases()->create([
+            'fecha' => '2026-03-12',
+            'sin_clase' => true,
+            'comentario' => 'Feriado',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('asignaturas.planificacion', $asignatura))
+            ->assertOk()
+            ->assertSee('id="acordeon-planificacion"', false)
+            ->assertSee('bg-info-50', false)
+            ->assertSee('bg-warning-50', false)
+            ->assertSee('Línea de tiempo')
+            ->assertSee('Presentación de inicio y evaluación diagnóstica')
+            ->assertSee('EVALUACION_RECUPERATIVA')
+            ->assertSee('EXAMEN_1')
+            ->assertSee('EXAMEN_REPETICION')
+            ->assertSee('Sin clase')
+            ->assertSee('Feriado')
+            ->assertSee('12/03/2026')
+            ->assertSee('Generar una planificación diferente');
+    }
+
+    public function test_plan_request_sends_every_class_date_with_available_minutes(): void
+    {
+        $user = User::factory()->create();
+        $asignatura = $this->asignaturaConCincoDias($user);
+
+        $encargo = app(GenerarPlanificacion::class)->encargo($asignatura);
+        $fechas = collect($encargo['jornadas'])->pluck('duracion_minutos', 'fecha');
+
+        $this->assertSame(
+            ['2026-03-02', '2026-03-09', '2026-03-16', '2026-03-23', '2026-03-30'],
+            $fechas->keys()->all(),
+        );
+        $this->assertSame(90, $fechas->get('2026-03-02'));
+        $this->assertSame(90, $encargo['jornadas'][0]['minutos_disponibles_para_clases']);
+        $this->assertSame(0, $encargo['jornadas'][1]['minutos_disponibles_para_clases']);
+    }
+
     public function test_only_the_owner_can_download_the_pdf(): void
     {
         Storage::fake('local');
@@ -588,6 +738,49 @@ class AsignaturaControllerTest extends TestCase
         $this->actingAs($otro)
             ->get(route('asignaturas.documento.descargar', $asignatura))
             ->assertNotFound();
+    }
+
+    private function asignaturaConCincoDias(User $user): Asignatura
+    {
+        $asignatura = Asignatura::factory()->for($user)->create([
+            'fecha_inicio' => '2026-03-02',
+            'fecha_termino' => '2026-03-30',
+            'unidades' => [
+                'cantidad' => 2,
+                'unidades' => [
+                    [
+                        'nombre' => 'Orígenes',
+                        'horas_sugeridas' => 2,
+                        'aprendizaje_esperado' => 'Explica el origen',
+                        'criterios_evaluacion' => ['Fundamenta con fuentes'],
+                        'contenidos_obligatorios' => ['Línea de tiempo'],
+                        'tipo_habilidad' => 'Análisis',
+                        'competencias_personales_sociales_valoricas' => 'Trabajo colaborativo',
+                    ],
+                    [
+                        'nombre' => 'República',
+                        'horas_sugeridas' => 2,
+                        'aprendizaje_esperado' => 'Describe la república',
+                        'criterios_evaluacion' => ['Ordena hechos'],
+                        'contenidos_obligatorios' => ['Constitución'],
+                        'tipo_habilidad' => 'Comprensión',
+                        'competencias_personales_sociales_valoricas' => 'Respeto',
+                    ],
+                ],
+            ],
+        ]);
+
+        foreach (['2026-03-02', '2026-03-09', '2026-03-16', '2026-03-23', '2026-03-30'] as $numero => $fecha) {
+            $asignatura->clases()->create([
+                'numero' => $numero + 1,
+                'fecha' => $fecha,
+                'hora_inicio' => '08:00',
+                'hora_termino' => '09:30',
+                'sin_clase' => false,
+            ]);
+        }
+
+        return $asignatura;
     }
 
     /**

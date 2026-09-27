@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Auth;
 
-#[Fillable(['user_id', 'nombre', 'descripcion', 'fecha_inicio', 'fecha_termino', 'pdf_path', 'pdf_nombre', 'markdown', 'unidades'])]
+#[Fillable(['user_id', 'nombre', 'descripcion', 'fecha_inicio', 'fecha_termino', 'pdf_path', 'pdf_nombre', 'markdown', 'unidades', 'planificacion'])]
 class Asignatura extends Model
 {
     /** @use HasFactory<AsignaturaFactory> */
@@ -25,6 +25,7 @@ class Asignatura extends Model
             'fecha_inicio' => 'date',
             'fecha_termino' => 'date',
             'unidades' => 'array',
+            'planificacion' => 'array',
         ];
     }
 

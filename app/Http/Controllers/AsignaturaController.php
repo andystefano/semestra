@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Actions\AprenderProgramaModulo;
 use App\Actions\GenerarClasesAsignatura;
+use App\Actions\GenerarPlanificacion;
 use App\Actions\ProcesarPdfAsignatura;
+use App\Actions\RespuestaPlanificacionInvalida;
 use App\Actions\ResumenActividades;
 use App\Http\Requests\PrepararAsignaturaRequest;
 use App\Http\Requests\SubirPdfAsignaturaRequest;
@@ -24,6 +26,7 @@ class AsignaturaController extends Controller
         private GenerarClasesAsignatura $generarClases,
         private ProcesarPdfAsignatura $procesarPdf,
         private AprenderProgramaModulo $aprenderPrograma,
+        private GenerarPlanificacion $generarPlanificacion,
     ) {}
 
     public function index(): View
@@ -184,6 +187,61 @@ class AsignaturaController extends Controller
         return view('asignaturas.actividades', [
             'asignatura' => $asignatura,
             'resumen' => ResumenActividades::desde($asignatura),
+        ]);
+    }
+
+    public function generarPlanificacion(Asignatura $asignatura): JsonResponse
+    {
+        Gate::authorize('update', $asignatura);
+
+        try {
+            $planificacion = $this->generarPlanificacion->handle($asignatura);
+        } catch (RuntimeException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'respuesta' => $exception instanceof RespuestaPlanificacionInvalida ? $exception->respuesta : null,
+            ], 422);
+        }
+
+        $asignatura->update([
+            'planificacion' => $planificacion,
+        ]);
+
+        return response()->json([
+            'url' => route('asignaturas.planificacion', $asignatura),
+        ]);
+    }
+
+    public function planificacion(Asignatura $asignatura): View
+    {
+        Gate::authorize('view', $asignatura);
+
+        $asignatura->load('clases');
+        $plan = $asignatura->planificacion ?? [];
+        $bloquesPorFecha = collect($plan['calendario'] ?? [])->keyBy('fecha');
+        $fechas = $asignatura->clases
+            ->map(fn ($clase): string => $clase->fecha->toDateString())
+            ->merge($bloquesPorFecha->keys())
+            ->unique()
+            ->sort()
+            ->values();
+
+        $dias = $fechas->map(function (string $fecha) use ($asignatura, $bloquesPorFecha): array {
+            $delDia = $asignatura->clases->filter(
+                fn ($clase): bool => $clase->fecha->toDateString() === $fecha
+            );
+
+            return [
+                'fecha' => $fecha,
+                'sin_clase' => $delDia->isNotEmpty() && $delDia->every(fn ($clase): bool => $clase->sin_clase),
+                'comentario' => $delDia->pluck('comentario')->filter()->first(),
+                'bloques' => $bloquesPorFecha->get($fecha)['bloques'] ?? [],
+            ];
+        });
+
+        return view('asignaturas.planificacion', [
+            'asignatura' => $asignatura,
+            'dias' => $dias,
         ]);
     }
 

@@ -31,6 +31,8 @@ Route::middleware('auth')->group(function () {
     Route::post('asignaturas/{asignatura}/documento/aprender', [AsignaturaController::class, 'aprenderPrograma'])->name('asignaturas.documento.aprender');
     Route::get('asignaturas/{asignatura}/unidades', [AsignaturaController::class, 'unidades'])->name('asignaturas.unidades');
     Route::get('asignaturas/{asignatura}/actividades', [AsignaturaController::class, 'actividades'])->name('asignaturas.actividades');
+    Route::post('asignaturas/{asignatura}/actividades/generar', [AsignaturaController::class, 'generarPlanificacion'])->name('asignaturas.actividades.generar');
+    Route::get('asignaturas/{asignatura}/planificacion', [AsignaturaController::class, 'planificacion'])->name('asignaturas.planificacion');
     Route::get('asignaturas/{asignatura}/documento/descargar', [AsignaturaController::class, 'descargarPdf'])->name('asignaturas.documento.descargar');
     Route::get('asignaturas/{asignatura}/editar', [AsignaturaController::class, 'edit'])->name('asignaturas.edit');
     Route::put('asignaturas/{asignatura}', [AsignaturaController::class, 'update'])->name('asignaturas.update');
