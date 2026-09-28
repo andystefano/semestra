@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Actions\AprenderProgramaModulo;
 use App\Actions\GenerarClasesAsignatura;
+use App\Actions\GenerarGuiaEstudio;
 use App\Actions\GenerarPlanificacion;
 use App\Actions\ProcesarPdfAsignatura;
 use App\Actions\RespuestaPlanificacionInvalida;
@@ -11,8 +12,10 @@ use App\Actions\ResumenActividades;
 use App\Http\Requests\PrepararAsignaturaRequest;
 use App\Http\Requests\SubirPdfAsignaturaRequest;
 use App\Models\Asignatura;
+use App\Models\GuiaEstudio;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
@@ -27,6 +30,7 @@ class AsignaturaController extends Controller
         private ProcesarPdfAsignatura $procesarPdf,
         private AprenderProgramaModulo $aprenderPrograma,
         private GenerarPlanificacion $generarPlanificacion,
+        private GenerarGuiaEstudio $generarGuia,
     ) {}
 
     public function index(): View
@@ -216,7 +220,7 @@ class AsignaturaController extends Controller
     {
         Gate::authorize('view', $asignatura);
 
-        $asignatura->load('clases');
+        $asignatura->load(['clases', 'guias']);
         $plan = $asignatura->planificacion ?? [];
         $bloquesPorFecha = collect($plan['calendario'] ?? [])->keyBy('fecha');
         $fechas = $asignatura->clases
@@ -242,7 +246,42 @@ class AsignaturaController extends Controller
         return view('asignaturas.planificacion', [
             'asignatura' => $asignatura,
             'dias' => $dias,
+            'guias' => $asignatura->guias->keyBy(fn (GuiaEstudio $guia): string => $guia->fecha->toDateString().'|'.$guia->orden),
         ]);
+    }
+
+    public function generarGuia(Request $request, Asignatura $asignatura): JsonResponse
+    {
+        Gate::authorize('update', $asignatura);
+
+        $datos = $request->validate([
+            'fecha' => ['required', 'date_format:Y-m-d'],
+            'orden' => ['required', 'integer', 'min:1'],
+        ], [
+            'fecha.required' => 'Falta la fecha de la clase.',
+            'fecha.date_format' => 'La fecha de la clase no es válida.',
+            'orden.required' => 'Falta el bloque de la clase.',
+        ]);
+
+        try {
+            $guia = $this->generarGuia->handle($asignatura, $datos['fecha'], (int) $datos['orden']);
+        } catch (RuntimeException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'url' => route('asignaturas.guias.descargar', [$asignatura, $guia]),
+        ]);
+    }
+
+    public function descargarGuia(Asignatura $asignatura, GuiaEstudio $guia): StreamedResponse
+    {
+        Gate::authorize('view', $asignatura);
+        abort_unless($guia->asignatura_id === $asignatura->id && Storage::disk('local')->exists($guia->archivo_path), 404);
+
+        return Storage::disk('local')->download($guia->archivo_path, $guia->archivo_nombre);
     }
 
     public function descargarPdf(Asignatura $asignatura): StreamedResponse

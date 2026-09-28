@@ -71,4 +71,12 @@ class Asignatura extends Model
     {
         return $this->hasMany(AsignaturaClase::class)->orderBy('fecha')->orderBy('hora_inicio')->orderBy('numero');
     }
+
+    /**
+     * @return HasMany<GuiaEstudio, $this>
+     */
+    public function guias(): HasMany
+    {
+        return $this->hasMany(GuiaEstudio::class);
+    }
 }
