@@ -172,8 +172,13 @@
                                                 $guia = ($guias ?? collect())->get($claveGuia);
                                             @endphp
                                             <div class="mt-3 guia-acciones">
+                                                @php
+                                                    $presentacion = ($presentaciones ?? collect())->get($claveGuia);
+                                                @endphp
                                                 <button type="button" class="btn btn-sm btn-primary generar-guia" data-fecha="{{ $dia['fecha'] }}" data-orden="{{ $bloque['orden'] ?? 1 }}">Generar guía de estudios</button>
                                                 <a class="btn btn-sm btn-outline-primary ml-1 descargar-guia {{ $guia ? '' : 'd-none' }}" href="{{ $guia ? route('asignaturas.guias.descargar', [$asignatura, $guia]) : '#' }}">Descargar guía</a>
+                                                <button type="button" class="btn btn-sm btn-secondary ml-1 generar-presentacion" data-fecha="{{ $dia['fecha'] }}" data-orden="{{ $bloque['orden'] ?? 1 }}">Generar presentación clase</button>
+                                                <a class="btn btn-sm btn-outline-secondary ml-1 descargar-presentacion {{ $presentacion ? '' : 'd-none' }}" href="{{ $presentacion ? route('asignaturas.presentaciones.descargar', [$asignatura, $presentacion]) : '#' }}">Descargar presentación</a>
                                             </div>
                                         @endif
                                     @endif
@@ -334,6 +339,72 @@
                         boton.textContent = 'Generar guía de estudios';
                     }).catch(function () {
                         error.textContent = 'No se pudo generar la guía de estudios.';
+                        error.classList.remove('d-none');
+                    }).finally(function () {
+                        clearInterval(reloj);
+                        boton.disabled = false;
+                        cargando.classList.remove('d-flex');
+                        cargando.classList.add('d-none');
+                    });
+                });
+            });
+
+            document.querySelectorAll('.generar-presentacion').forEach(function (boton) {
+                boton.addEventListener('click', function () {
+                    var cargando = document.getElementById('cargando-guia');
+                    var mensaje = document.getElementById('mensaje-guia');
+                    var error = document.getElementById('error-planificacion');
+                    var avisos = [
+                        'revisando la clase anterior',
+                        'preparando el momento para conocer',
+                        'diseñando las diapositivas'
+                    ];
+                    var indice = 0;
+                    var reloj = setInterval(function () {
+                        indice = (indice + 1) % avisos.length;
+                        mensaje.textContent = avisos[indice];
+                    }, 2500);
+                    var acciones = boton.parentElement;
+
+                    boton.disabled = true;
+                    error.classList.add('d-none');
+                    mensaje.textContent = avisos[0];
+                    cargando.classList.remove('d-none');
+                    cargando.classList.add('d-flex');
+
+                    fetch(@json(route('asignaturas.presentaciones.generar', $asignatura)), {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        },
+                        body: JSON.stringify({
+                            fecha: boton.dataset.fecha,
+                            orden: Number(boton.dataset.orden)
+                        })
+                    }).then(function (respuesta) {
+                        return respuesta.text().then(function (texto) {
+                            var datos = {};
+                            try {
+                                datos = texto ? JSON.parse(texto) : {};
+                            } catch (e) {
+                                datos = { message: 'El servidor cortó la generación. Reinicia Laragon e inténtalo de nuevo.' };
+                            }
+                            return { ok: respuesta.ok, datos: datos };
+                        });
+                    }).then(function (resultado) {
+                        if (! resultado.ok) {
+                            error.textContent = resultado.datos.message || 'No se pudo generar la presentación.';
+                            error.classList.remove('d-none');
+                            return;
+                        }
+
+                        var enlace = acciones.querySelector('.descargar-presentacion');
+                        enlace.href = resultado.datos.url;
+                        enlace.classList.remove('d-none');
+                    }).catch(function () {
+                        error.textContent = 'No se pudo generar la presentación.';
                         error.classList.remove('d-none');
                     }).finally(function () {
                         clearInterval(reloj);

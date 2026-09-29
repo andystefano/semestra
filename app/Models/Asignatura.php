@@ -79,4 +79,12 @@ class Asignatura extends Model
     {
         return $this->hasMany(GuiaEstudio::class);
     }
+
+    /**
+     * @return HasMany<Presentacion, $this>
+     */
+    public function presentaciones(): HasMany
+    {
+        return $this->hasMany(Presentacion::class);
+    }
 }

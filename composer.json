@@ -24,6 +24,8 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "PhpOffice\\PhpPresentation\\": "lib/PHPPresentation-master/src/PhpPresentation/",
+            "PhpOffice\\Common\\": "lib/Common-master/src/Common/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }

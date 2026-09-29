@@ -34,6 +34,8 @@ Route::middleware('auth')->group(function () {
     Route::post('asignaturas/{asignatura}/actividades/generar', [AsignaturaController::class, 'generarPlanificacion'])->name('asignaturas.actividades.generar');
     Route::post('asignaturas/{asignatura}/planificacion/guias', [AsignaturaController::class, 'generarGuia'])->name('asignaturas.guias.generar');
     Route::get('asignaturas/{asignatura}/guias/{guia}/descargar', [AsignaturaController::class, 'descargarGuia'])->name('asignaturas.guias.descargar');
+    Route::post('asignaturas/{asignatura}/planificacion/presentaciones', [AsignaturaController::class, 'generarPresentacion'])->name('asignaturas.presentaciones.generar');
+    Route::get('asignaturas/{asignatura}/presentaciones/{presentacion}/descargar', [AsignaturaController::class, 'descargarPresentacion'])->name('asignaturas.presentaciones.descargar');
     Route::get('asignaturas/{asignatura}/planificacion', [AsignaturaController::class, 'planificacion'])->name('asignaturas.planificacion');
     Route::get('asignaturas/{asignatura}/documento/descargar', [AsignaturaController::class, 'descargarPdf'])->name('asignaturas.documento.descargar');
     Route::get('asignaturas/{asignatura}/editar', [AsignaturaController::class, 'edit'])->name('asignaturas.edit');
