@@ -152,12 +152,8 @@ class GenerarPresentacionClase
      */
     private function fijas(array $bloque, array $contenidos, array $criterios): array
     {
-        $aprendizaje = array_values(array_filter([
-            trim((string) ($bloque['aprendizaje_esperado'] ?? '')),
-        ]));
-
         return array_merge(
-            $this->fija('datos_aprendizaje', 'Aprendizaje esperado', $aprendizaje === [] ? [''] : $aprendizaje),
+            [$this->aprendizaje('Aprendizaje esperado', (string) ($bloque['aprendizaje_esperado'] ?? ''))],
             $this->fija('datos_criterios', 'Criterios de evaluación', $criterios === [] ? [''] : $criterios),
             $this->fija('datos_contenidos', 'Contenidos', $contenidos === [] ? [''] : $contenidos),
         );
@@ -187,6 +183,39 @@ class GenerarPresentacionClase
         }
 
         return $salida;
+    }
+
+    /**
+     * @return array{layout: string, titulo: string, campos: array<string, string>, diapositiva: int, numerada: bool}
+     */
+    private function aprendizaje(string $titulo, string $texto): array
+    {
+        $def = CatalogoLayouts::obtener('datos_aprendizaje');
+        $texto = trim(str_replace(["\r\n", "\r", "\u{00A0}"], ["\n", "\n", ' '], $texto));
+        $marca = '/(?<![0-9])\d+\.(?:[-–—−]\s*|\s+)/u';
+        $numerada = $texto !== '' && preg_match($marca, $texto) === 1;
+        $partes = $numerada ? preg_split($marca, $texto) : [$texto];
+        $partes = array_values(array_filter(array_map(
+            fn (string $parte): string => trim($parte),
+            $partes ?: [],
+        ), fn (string $parte): bool => $parte !== ''));
+        $contenido = $numerada && $partes !== [] ? implode("\n", $partes) : $texto;
+        $campos = CatalogoLayouts::ajustarCampos($def, [
+            'TITULO' => $titulo,
+            'CONTENIDO' => $contenido,
+        ]);
+
+        if ($numerada) {
+            $campos['CONTENIDO'] = $contenido;
+        }
+
+        return [
+            'layout' => 'datos_aprendizaje',
+            'titulo' => $campos['TITULO'] ?? $titulo,
+            'campos' => $campos,
+            'diapositiva' => $def['diapositiva'],
+            'numerada' => $numerada,
+        ];
     }
 
     /**
@@ -253,7 +282,7 @@ class GenerarPresentacionClase
             $numeroSlide = $indice + 2;
             $usados[$numeroSlide] = true;
             $base = $plantillas[(int) $diapositiva['diapositiva']];
-            $zip->addFromString('ppt/slides/slide'.$numeroSlide.'.xml', $this->unicos($this->aplicarCampos($base['xml'], $diapositiva['campos']), $indice));
+            $zip->addFromString('ppt/slides/slide'.$numeroSlide.'.xml', $this->unicos($this->aplicarCampos($base['xml'], $diapositiva['campos'], (bool) ($diapositiva['numerada'] ?? false)), $indice));
             $zip->addFromString('ppt/slides/_rels/slide'.$numeroSlide.'.xml.rels', $this->sinNotas($base['rels']));
         }
 
@@ -362,8 +391,13 @@ class GenerarPresentacionClase
     /**
      * @param  array<string, string>  $campos
      */
-    private function aplicarCampos(string $xml, array $campos): string
+    private function aplicarCampos(string $xml, array $campos, bool $numerada = false): string
     {
+        if ($numerada && isset($campos['CONTENIDO'])) {
+            $xml = $this->numerar($xml, 'CONTENIDO', explode("\n", $campos['CONTENIDO']));
+            unset($campos['CONTENIDO']);
+        }
+
         foreach ($campos as $marca => $valor) {
             $lineas = explode("\n", str_replace("\r", '', $valor));
             $reemplazo = preg_replace_callback(
@@ -393,6 +427,49 @@ class GenerarPresentacionClase
         }
 
         return $xml;
+    }
+
+    /**
+     * @param  list<string>  $lineas
+     */
+    private function numerar(string $xml, string $marca, array $lineas): string
+    {
+        $token = '{'.$marca.'}';
+
+        if (preg_match('/<a:p\b(?:(?!<\/a:p>).)*'.preg_quote($token, '/').'.*?<\/a:p>/s', $xml, $coincidencia) !== 1) {
+            return str_replace($token, $this->xml(implode(' ', $lineas)), $xml);
+        }
+
+        $parrafos = '';
+
+        foreach ($lineas as $linea) {
+            $linea = trim($linea);
+
+            if ($linea === '') {
+                continue;
+            }
+
+            $parrafo = str_replace($token, $this->xml($linea), $coincidencia[0]);
+            $parrafo = preg_replace('/<a:buNone\/>/', '<a:buClr><a:schemeClr val="bg1"/></a:buClr><a:buFont typeface="Arial"/><a:buAutoNum type="arabicPeriod"/>', $parrafo, 1) ?? $parrafo;
+            $parrafo = preg_replace('/(<a:pPr\b[^>]*\bmarL=")[^"]+(")/', '${1}285750$2', $parrafo, 1) ?? $parrafo;
+            $parrafo = preg_replace('/(<a:pPr\b[^>]*\bindent=")[^"]+(")/', '${1}-285750$2', $parrafo, 1) ?? $parrafo;
+            $parrafo = preg_replace('/\bsz="\d+"/', 'sz="'.$this->tamanoLista(count($lineas)).'"', $parrafo) ?? $parrafo;
+            $parrafos .= $parrafo;
+        }
+
+        $xml = str_replace($coincidencia[0], $parrafos !== '' ? $parrafos : $coincidencia[0], $xml);
+
+        return str_replace('<a:noAutofit/>', '<a:normAutofit/>', $xml);
+    }
+
+    private function tamanoLista(int $cantidad): string
+    {
+        return match (true) {
+            $cantidad >= 4 => '1200',
+            $cantidad === 3 => '1400',
+            $cantidad === 2 => '1600',
+            default => '2000',
+        };
     }
 
     private function propiedades(string $xml, array $titulos): string

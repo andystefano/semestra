@@ -45,7 +45,7 @@ class PresentacionClaseTest extends TestCase
                             'orden' => 1,
                             'tipo' => 'CLASE',
                             'unidad' => 1,
-                            'aprendizaje_esperado' => 'Explica el origen',
+                            'aprendizaje_esperado' => '1.-Explica el origen de la línea de tiempo '.str_repeat('con detalle ', 18).'2.-Reconoce sus hitos históricos por completo.',
                             'criterios_evaluacion' => ['Fundamenta con fuentes', 'Cita el origen'],
                             'contenidos_obligatorios' => [
                                 ['nombre' => 'Línea de tiempo', 'minutos_asignados' => 90],
@@ -192,6 +192,12 @@ class PresentacionClaseTest extends TestCase
         $this->assertFalse($notas);
         $this->assertIsString($datos);
         $this->assertStringContainsString('Aprendizaje esperado', $datos);
+        $this->assertStringContainsString('Explica el origen de la línea de tiempo', $datos);
+        $this->assertStringContainsString('Reconoce sus hitos históricos por completo', $datos);
+        $this->assertStringContainsString('buAutoNum', $datos);
+        $this->assertStringContainsString('normAutofit', $datos);
+        $this->assertStringNotContainsString('1.-', $datos);
+        $this->assertStringNotContainsString('2.-', $datos);
         $this->assertStringNotContainsString('Criterios de evaluación', $datos);
         $this->assertStringNotContainsString('{TITULO}', $datos);
         $this->assertStringNotContainsString('{CONTENIDO}', $datos);
