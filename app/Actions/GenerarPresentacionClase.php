@@ -100,6 +100,7 @@ class GenerarPresentacionClase
 
         foreach ($bloque['contenidos_obligatorios'] ?? [] as $contenido) {
             $nombre = is_array($contenido) ? trim((string) ($contenido['nombre'] ?? '')) : trim((string) $contenido);
+            $nombre = $this->sinMarca($nombre);
 
             if ($nombre !== '') {
                 $contenidos[] = $nombre;
@@ -107,6 +108,14 @@ class GenerarPresentacionClase
         }
 
         return array_values(array_unique($contenidos));
+    }
+
+    private function sinMarca(string $texto): string
+    {
+        $texto = trim($texto);
+        $texto = preg_replace('/^(?:(?:\d+\.)+(?:\p{Pd}+\s*|\s+))+/u', '', $texto) ?? $texto;
+
+        return trim(preg_replace('/^(?:\p{Pd}+\s*)+/u', '', $texto) ?? $texto);
     }
 
     /**
@@ -155,7 +164,7 @@ class GenerarPresentacionClase
         return array_merge(
             [$this->enunciados('datos_aprendizaje', 'Aprendizaje esperado', (string) ($bloque['aprendizaje_esperado'] ?? ''))],
             [$this->enunciados('datos_criterios', 'Criterios de evaluación', implode("\n", $criterios))],
-            $this->fija('datos_contenidos', 'Contenidos', $contenidos === [] ? [''] : $contenidos),
+            [$this->enunciados('datos_contenidos', 'Contenidos obligatorios', implode("\n", $contenidos))],
         );
     }
 
@@ -194,19 +203,53 @@ class GenerarPresentacionClase
         $texto = trim(str_replace(["\r\n", "\r", "\u{00A0}"], ["\n", "\n", ' '], $texto));
         $marca = '/(?<=^|\s)(?:\d+\.)+(?:\p{Pd}+\s*|\s+)(?=\p{L})/u';
         $numerada = $texto !== '' && preg_match($marca, $texto) === 1;
-        $partes = $numerada ? preg_split($marca, $texto) : [$texto];
+        $partes = $numerada ? preg_split($marca, $texto) : [];
         $partes = array_values(array_filter(array_map(
             fn (string $parte): string => trim($parte),
             $partes ?: [],
         ), fn (string $parte): bool => $parte !== ''));
+        $lineas = preg_split('/\R/u', $texto) ?: [];
+        $conGuion = false;
+        $sueltas = [];
 
-        if (! $numerada || $partes === []) {
-            $lineas = $partes !== [] ? $partes : [''];
+        foreach ($lineas as $linea) {
+            $linea = trim($linea);
 
-            return $this->fija($layout, $titulo, $lineas)[0];
+            if ($linea === '') {
+                continue;
+            }
+
+            $limpia = preg_replace('/^(?:\p{Pd}+\s*)+/u', '', $linea) ?? $linea;
+
+            if ($limpia !== $linea) {
+                $conGuion = true;
+            }
+
+            if (trim($limpia) !== '') {
+                $sueltas[] = trim($limpia);
+            }
         }
 
-        $contenido = implode("\n", $partes);
+        if ($numerada && $partes !== []) {
+            $items = [];
+
+            foreach ($partes as $parte) {
+                foreach (preg_split('/\R/u', $parte) ?: [] as $linea) {
+                    $linea = trim(preg_replace('/^(?:\p{Pd}+\s*)+/u', '', trim($linea)) ?? $linea);
+
+                    if ($linea !== '') {
+                        $items[] = $linea;
+                    }
+                }
+            }
+        } elseif ($conGuion || count($sueltas) > 1) {
+            $items = $sueltas;
+            $numerada = true;
+        } else {
+            return $this->fija($layout, $titulo, $sueltas !== [] ? $sueltas : [''])[0];
+        }
+
+        $contenido = implode("\n", $items);
         $campos = CatalogoLayouts::ajustarCampos($def, [
             'TITULO' => $titulo,
             'CONTENIDO' => $contenido,

@@ -51,7 +51,8 @@ class PresentacionClaseTest extends TestCase
                                 '1.2.-Cita el origen por completo.',
                             ],
                             'contenidos_obligatorios' => [
-                                ['nombre' => 'Línea de tiempo', 'minutos_asignados' => 90],
+                                ['nombre' => '1.-Línea de tiempo', 'minutos_asignados' => 90],
+                                ['nombre' => '-Patrones', 'minutos_asignados' => 45],
                             ],
                         ]],
                     ],
@@ -164,7 +165,7 @@ class PresentacionClaseTest extends TestCase
 
         $presentacion = Presentacion::query()->first();
         $this->assertNotNull($presentacion);
-        $this->assertSame(['Línea de tiempo'], $presentacion->contenidos);
+        $this->assertSame(['Línea de tiempo', 'Patrones'], $presentacion->contenidos);
         $this->assertSame('Lo ya visto', $presentacion->plan_pedagogico['contexto']['recordar'][0]['titulo']);
         $this->assertSame(['Línea de tiempo'], $presentacion->plan_pedagogico['bloques'][0]['contenidos']);
         $this->assertSame('Lo ya visto', $presentacion->diapositivas[0]['titulo']);
@@ -210,7 +211,11 @@ class PresentacionClaseTest extends TestCase
         $this->assertStringContainsString('buAutoNum', $criterios);
         $this->assertStringNotContainsString('1.1.-', $criterios);
         $this->assertStringNotContainsString('1.2.-', $criterios);
-        $this->assertStringContainsString('Contenidos', $contenidos);
+        $this->assertStringContainsString('Contenidos obligatorios', $contenidos);
+        $this->assertStringContainsString('Línea de tiempo', $contenidos);
+        $this->assertStringContainsString('Patrones', $contenidos);
+        $this->assertStringContainsString('buAutoNum', $contenidos);
+        $this->assertStringNotContainsString('1.-', $contenidos);
         $this->assertIsString($conocer);
         $this->assertStringContainsString('Momento para conocer', $conocer);
         $this->assertStringNotContainsString('{DEFINICION}', $conocer);
