@@ -46,7 +46,10 @@ class PresentacionClaseTest extends TestCase
                             'tipo' => 'CLASE',
                             'unidad' => 1,
                             'aprendizaje_esperado' => '1.-Explica el origen de la línea de tiempo '.str_repeat('con detalle ', 18).'2.-Reconoce sus hitos históricos por completo.',
-                            'criterios_evaluacion' => ['Fundamenta con fuentes', 'Cita el origen'],
+                            'criterios_evaluacion' => [
+                                '1.1.-Fundamenta con fuentes '.str_repeat('y evidencia ', 28),
+                                '1.2.-Cita el origen por completo.',
+                            ],
                             'contenidos_obligatorios' => [
                                 ['nombre' => 'Línea de tiempo', 'minutos_asignados' => 90],
                             ],
@@ -202,8 +205,11 @@ class PresentacionClaseTest extends TestCase
         $this->assertStringNotContainsString('{TITULO}', $datos);
         $this->assertStringNotContainsString('{CONTENIDO}', $datos);
         $this->assertStringContainsString('Criterios de evaluación', $criterios);
-        $this->assertStringContainsString('Cita el origen', $criterios);
-        $this->assertStringContainsString('</a:r><a:br/><a:r>', $criterios);
+        $this->assertStringContainsString('Fundamenta con fuentes', $criterios);
+        $this->assertStringContainsString('Cita el origen por completo', $criterios);
+        $this->assertStringContainsString('buAutoNum', $criterios);
+        $this->assertStringNotContainsString('1.1.-', $criterios);
+        $this->assertStringNotContainsString('1.2.-', $criterios);
         $this->assertStringContainsString('Contenidos', $contenidos);
         $this->assertIsString($conocer);
         $this->assertStringContainsString('Momento para conocer', $conocer);

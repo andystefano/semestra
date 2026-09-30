@@ -153,8 +153,8 @@ class GenerarPresentacionClase
     private function fijas(array $bloque, array $contenidos, array $criterios): array
     {
         return array_merge(
-            [$this->aprendizaje('Aprendizaje esperado', (string) ($bloque['aprendizaje_esperado'] ?? ''))],
-            $this->fija('datos_criterios', 'Criterios de evaluación', $criterios === [] ? [''] : $criterios),
+            [$this->enunciados('datos_aprendizaje', 'Aprendizaje esperado', (string) ($bloque['aprendizaje_esperado'] ?? ''))],
+            [$this->enunciados('datos_criterios', 'Criterios de evaluación', implode("\n", $criterios))],
             $this->fija('datos_contenidos', 'Contenidos', $contenidos === [] ? [''] : $contenidos),
         );
     }
@@ -188,33 +188,37 @@ class GenerarPresentacionClase
     /**
      * @return array{layout: string, titulo: string, campos: array<string, string>, diapositiva: int, numerada: bool}
      */
-    private function aprendizaje(string $titulo, string $texto): array
+    private function enunciados(string $layout, string $titulo, string $texto): array
     {
-        $def = CatalogoLayouts::obtener('datos_aprendizaje');
+        $def = CatalogoLayouts::obtener($layout);
         $texto = trim(str_replace(["\r\n", "\r", "\u{00A0}"], ["\n", "\n", ' '], $texto));
-        $marca = '/(?<![0-9])\d+\.(?:[-–—−]\s*|\s+)/u';
+        $marca = '/(?<=^|\s)(?:\d+\.)+(?:\p{Pd}+\s*|\s+)(?=\p{L})/u';
         $numerada = $texto !== '' && preg_match($marca, $texto) === 1;
         $partes = $numerada ? preg_split($marca, $texto) : [$texto];
         $partes = array_values(array_filter(array_map(
             fn (string $parte): string => trim($parte),
             $partes ?: [],
         ), fn (string $parte): bool => $parte !== ''));
-        $contenido = $numerada && $partes !== [] ? implode("\n", $partes) : $texto;
+
+        if (! $numerada || $partes === []) {
+            $lineas = $partes !== [] ? $partes : [''];
+
+            return $this->fija($layout, $titulo, $lineas)[0];
+        }
+
+        $contenido = implode("\n", $partes);
         $campos = CatalogoLayouts::ajustarCampos($def, [
             'TITULO' => $titulo,
             'CONTENIDO' => $contenido,
         ]);
-
-        if ($numerada) {
-            $campos['CONTENIDO'] = $contenido;
-        }
+        $campos['CONTENIDO'] = $contenido;
 
         return [
-            'layout' => 'datos_aprendizaje',
+            'layout' => $layout,
             'titulo' => $campos['TITULO'] ?? $titulo,
             'campos' => $campos,
             'diapositiva' => $def['diapositiva'],
-            'numerada' => $numerada,
+            'numerada' => true,
         ];
     }
 
@@ -450,7 +454,11 @@ class GenerarPresentacionClase
             }
 
             $parrafo = str_replace($token, $this->xml($linea), $coincidencia[0]);
-            $parrafo = preg_replace('/<a:buNone\/>/', '<a:buClr><a:schemeClr val="bg1"/></a:buClr><a:buFont typeface="Arial"/><a:buAutoNum type="arabicPeriod"/>', $parrafo, 1) ?? $parrafo;
+            if (str_contains($parrafo, '<a:buChar')) {
+                $parrafo = preg_replace('/<a:buChar\b[^>]*\/>/', '<a:buAutoNum type="arabicPeriod"/>', $parrafo, 1) ?? $parrafo;
+            } else {
+                $parrafo = preg_replace('/<a:buNone\/>/', '<a:buClr><a:schemeClr val="bg1"/></a:buClr><a:buFont typeface="Arial"/><a:buAutoNum type="arabicPeriod"/>', $parrafo, 1) ?? $parrafo;
+            }
             $parrafo = preg_replace('/(<a:pPr\b[^>]*\bmarL=")[^"]+(")/', '${1}285750$2', $parrafo, 1) ?? $parrafo;
             $parrafo = preg_replace('/(<a:pPr\b[^>]*\bindent=")[^"]+(")/', '${1}-285750$2', $parrafo, 1) ?? $parrafo;
             $parrafo = preg_replace('/\bsz="\d+"/', 'sz="'.$this->tamanoLista(count($lineas)).'"', $parrafo) ?? $parrafo;
@@ -465,6 +473,8 @@ class GenerarPresentacionClase
     private function tamanoLista(int $cantidad): string
     {
         return match (true) {
+            $cantidad >= 12 => '1000',
+            $cantidad >= 8 => '1100',
             $cantidad >= 4 => '1200',
             $cantidad === 3 => '1400',
             $cantidad === 2 => '1600',
