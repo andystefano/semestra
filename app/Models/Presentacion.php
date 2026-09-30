@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'orden',
     'contenidos',
     'diapositivas',
+    'plan_pedagogico',
     'archivo_path',
     'archivo_nombre',
 ])]
@@ -29,6 +30,7 @@ class Presentacion extends Model
             'orden' => 'integer',
             'contenidos' => 'array',
             'diapositivas' => 'array',
+            'plan_pedagogico' => 'array',
         ];
     }
 

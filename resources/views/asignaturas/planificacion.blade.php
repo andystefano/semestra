@@ -355,9 +355,15 @@
                     var mensaje = document.getElementById('mensaje-guia');
                     var error = document.getElementById('error-planificacion');
                     var avisos = [
-                        'revisando la clase anterior',
-                        'preparando el momento para conocer',
-                        'diseñando las diapositivas'
+                        'armando el contexto de la clase',
+                        'agrupando los bloques conceptuales',
+                        'definiendo el objetivo de cada bloque',
+                        'eligiendo la estrategia',
+                        'eligiendo los recursos',
+                        'ordenando la estructura del bloque',
+                        'redactando las diapositivas',
+                        'ajustando el diseño',
+                        'verificando el plan'
                     ];
                     var indice = 0;
                     var reloj = setInterval(function () {
