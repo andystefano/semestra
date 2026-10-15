@@ -707,6 +707,9 @@ class AsignaturaControllerTest extends TestCase
             ->assertSee('Sin clase')
             ->assertSee('Feriado')
             ->assertSee('12/03/2026')
+            ->assertSee('id="generar-presentaciones-faltantes"', false)
+            ->assertSee('Generar presentaciones faltantes')
+            ->assertSee(route('asignaturas.presentaciones.descargar-todas', $asignatura), false)
             ->assertSee('Generar una planificación diferente');
     }
 

@@ -6,6 +6,9 @@ use App\Models\Asignatura;
 use App\Models\Presentacion;
 use App\Presentacion\CatalogoLayouts;
 use App\Presentacion\ConstruirPlanPedagogico;
+use App\Presentacion\DiapositivaTabla;
+use App\Presentacion\FechasPlanificacion;
+use App\Presentacion\IdentificacionModulo;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -19,6 +22,11 @@ class GenerarPresentacionClase
         $indice = $this->indice($clases, $fecha, $orden);
         $bloque = $clases[$indice]['bloque'];
         $contenidos = $clases[$indice]['contenidos'];
+
+        if ($this->esPrimera($bloque, $contenidos)) {
+            return $this->primera($asignatura, $fecha, $orden, $indice + 1);
+        }
+
         $anteriores = $indice > 0 ? $clases[$indice - 1]['contenidos'] : [];
         $resultado = (new ConstruirPlanPedagogico)->construir(
             $asignatura,
@@ -60,7 +68,7 @@ class GenerarPresentacionClase
 
                 $contenidos = $this->contenidos($bloque);
 
-                if ($contenidos === []) {
+                if ($contenidos === [] && ! $this->esPrimera($bloque, $contenidos)) {
                     continue;
                 }
 
@@ -110,6 +118,106 @@ class GenerarPresentacionClase
         return array_values(array_unique($contenidos));
     }
 
+    /**
+     * @param  array<string, mixed>  $bloque
+     * @param  list<string>  $contenidos
+     */
+    private function esPrimera(array $bloque, array $contenidos): bool
+    {
+        return ($bloque['tipo'] ?? '') === 'CLASE'
+            && $contenidos === []
+            && empty($bloque['unidad']);
+    }
+
+    private function primera(Asignatura $asignatura, string $fecha, int $orden, int $numero): Presentacion
+    {
+        $laminas = $this->laminasPrimera($asignatura);
+        $archivo = $this->documento($asignatura, $fecha, $orden, $numero, [], [], $laminas);
+
+        return Presentacion::query()->updateOrCreate(
+            [
+                'asignatura_id' => $asignatura->id,
+                'fecha' => $fecha,
+                'orden' => $orden,
+            ],
+            [
+                'contenidos' => [],
+                'diapositivas' => $laminas,
+                'plan_pedagogico' => ['tipo' => 'primera_clase'],
+                'archivo_path' => $archivo['path'],
+                'archivo_nombre' => $archivo['nombre'],
+            ],
+        );
+    }
+
+    /**
+     * @return list<array{layout: string, titulo: string, campos: array<string, string>, diapositiva: int, xml?: string}>
+     */
+    private function laminasPrimera(Asignatura $asignatura): array
+    {
+        $zip = new ZipArchive;
+
+        if ($zip->open(resource_path('plantillas/Clase_Clase.pptx')) !== true) {
+            throw new RuntimeException('No se pudo leer la plantilla de la presentación.');
+        }
+
+        $base = $zip->getFromName('ppt/slides/slide2.xml');
+        $zip->close();
+
+        if (! is_string($base)) {
+            throw new RuntimeException('La plantilla no tiene la lámina de contenido.');
+        }
+
+        $tabla = new DiapositivaTabla;
+        $ficha = (new IdentificacionModulo)->desde($asignatura);
+        $fechas = (new FechasPlanificacion)->filas($asignatura);
+
+        return [
+            [
+                'layout' => 'tabla_identificacion',
+                'titulo' => 'Identificación de la asignatura',
+                'campos' => [],
+                'diapositiva' => 2,
+                'xml' => $tabla->insertar($base, 'Identificación de la asignatura', [
+                    ['celdas' => [
+                        ['texto' => 'Nombre de la Asignatura', 'encabezado' => true],
+                        ['texto' => $ficha['nombre'], 'span' => 3, 'encabezado' => true],
+                    ]],
+                    ['celdas' => [
+                        ['texto' => 'Horas de clase:'],
+                        ['texto' => $ficha['horas']],
+                        ['texto' => $ficha['horas_semanales']],
+                        ['texto' => '', 'lineas' => $ficha['dias'] !== [] ? $ficha['dias'] : ['—']],
+                    ]],
+                    ['celdas' => [
+                        ['texto' => 'Modalidad:'],
+                        ['texto' => $ficha['modalidad'], 'span' => 3],
+                    ]],
+                    ['celdas' => [
+                        ['texto' => 'Tributación el perfil de egreso:'],
+                        ['texto' => $ficha['tributacion'], 'span' => 3],
+                    ]],
+                    ['celdas' => [
+                        ['texto' => 'Unidad de Competencia:'],
+                        ['texto' => $ficha['unidad_competencia'], 'span' => 3],
+                    ]],
+                ], [2800000, 2200000, 2681600, 2681600]),
+            ],
+            [
+                'layout' => 'tabla_fechas',
+                'titulo' => 'Fechas de planificación',
+                'campos' => [],
+                'diapositiva' => 2,
+                'xml' => $tabla->insertar($base, 'Fechas de planificación', array_map(fn (array $fila): array => [
+                    'celdas' => [
+                        ['texto' => $fila['fecha']],
+                        ['texto' => trim($fila['etiqueta'].($fila['detalle'] !== '' ? ' · '.$fila['detalle'] : '')), 'span' => 2],
+                    ],
+                ], $fechas), [2800000, 3781600, 3781600]),
+            ],
+        ];
+    }
+
     private function sinMarca(string $texto): string
     {
         $texto = trim($texto);
@@ -141,7 +249,9 @@ class GenerarPresentacionClase
             fn (mixed $criterio): string => trim((string) $criterio),
             is_array($bloque['criterios_evaluacion'] ?? null) ? $bloque['criterios_evaluacion'] : [],
         )));
-        $diapositivas = array_merge($this->fijas($bloque, $contenidos, $criterios), $laminas);
+        $diapositivas = isset($laminas[0]['xml'])
+            ? $laminas
+            : array_merge($this->fijas($bloque, $contenidos, $criterios), $laminas);
 
         $nombre = 'Presentacion '.$fecha.' '.$orden.'.pptx';
         $path = 'asignaturas/'.$asignatura->id.'/presentaciones/'.$fecha.'-'.$orden.'.pptx';
@@ -305,6 +415,15 @@ class GenerarPresentacionClase
             throw new RuntimeException('La plantilla de la presentación está incompleta.');
         }
 
+        $baseNotas = $this->baseNotas($zip);
+        $conNotas = [];
+
+        foreach ($diapositivas as $indice => $diapositiva) {
+            if ($baseNotas !== null && trim((string) ($diapositiva['notas'] ?? '')) !== '') {
+                $conNotas[$indice + 2] = trim((string) $diapositiva['notas']);
+            }
+        }
+
         $portada = $zip->getFromName('ppt/slides/slide1.xml');
         $portadaRels = $zip->getFromName('ppt/slides/_rels/slide1.xml.rels');
         $portada = str_replace(
@@ -329,8 +448,21 @@ class GenerarPresentacionClase
             $numeroSlide = $indice + 2;
             $usados[$numeroSlide] = true;
             $base = $plantillas[(int) $diapositiva['diapositiva']];
-            $zip->addFromString('ppt/slides/slide'.$numeroSlide.'.xml', $this->unicos($this->aplicarCampos($base['xml'], $diapositiva['campos'], (bool) ($diapositiva['numerada'] ?? false)), $indice));
-            $zip->addFromString('ppt/slides/_rels/slide'.$numeroSlide.'.xml.rels', $this->sinNotas($base['rels']));
+            $xml = isset($diapositiva['xml'])
+                ? (string) $diapositiva['xml']
+                : $this->aplicarCampos($base['xml'], $diapositiva['campos'], (bool) ($diapositiva['numerada'] ?? false));
+            $zip->addFromString('ppt/slides/slide'.$numeroSlide.'.xml', $this->unicos($xml, $indice));
+            $rels = $this->sinNotas($base['rels']);
+
+            if (isset($conNotas[$numeroSlide])) {
+                $rels = str_replace(
+                    '</Relationships>',
+                    '<Relationship Id="rId'.$this->siguienteRelacion($rels).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide'.$numeroSlide.'.xml"/></Relationships>',
+                    $rels,
+                );
+            }
+
+            $zip->addFromString('ppt/slides/_rels/slide'.$numeroSlide.'.xml.rels', $rels);
         }
 
         if ($cierre !== 75) {
@@ -352,11 +484,32 @@ class GenerarPresentacionClase
         }
 
         for ($nota = 1; $nota <= 75; $nota++) {
+            if (isset($conNotas[$nota])) {
+                continue;
+            }
+
             $zip->deleteName('ppt/notesSlides/notesSlide'.$nota.'.xml');
             $zip->deleteName('ppt/notesSlides/_rels/notesSlide'.$nota.'.xml.rels');
         }
 
         $tipos = preg_replace('#<Override PartName="/ppt/notesSlides/notesSlide\d+\.xml"[^>]*/>#', '', $tipos) ?? $tipos;
+
+        foreach ($conNotas as $numeroSlide => $texto) {
+            $zip->addFromString('ppt/notesSlides/notesSlide'.$numeroSlide.'.xml', $this->notas((string) $baseNotas, $texto));
+            $zip->addFromString(
+                'ppt/notesSlides/_rels/notesSlide'.$numeroSlide.'.xml.rels',
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'."\n"
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide'.$numeroSlide.'.xml"/>'
+                .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>'
+                .'</Relationships>',
+            );
+            $tipos = str_replace(
+                '</Types>',
+                '<Override PartName="/ppt/notesSlides/notesSlide'.$numeroSlide.'.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/></Types>',
+                $tipos,
+            );
+        }
         $presentacion = $this->ordenar($presentacion, $vinculos, $cantidad, $cierre);
         $propiedades = $zip->getFromName('docProps/app.xml');
         $zip->addFromString('[Content_Types].xml', $tipos);
@@ -369,7 +522,7 @@ class GenerarPresentacionClase
                 array_map(fn (array $diapositiva): string => $diapositiva['titulo'] !== '' ? $diapositiva['titulo'] : 'Diapositiva', $diapositivas),
                 ['Cierre'],
             );
-            $zip->addFromString('docProps/app.xml', $this->propiedades($propiedades, $titulos));
+            $zip->addFromString('docProps/app.xml', $this->propiedades($propiedades, $titulos, count($conNotas)));
         }
 
         $zip->close();
@@ -525,7 +678,7 @@ class GenerarPresentacionClase
         };
     }
 
-    private function propiedades(string $xml, array $titulos): string
+    private function propiedades(string $xml, array $titulos, int $notas = 0): string
     {
         preg_match_all('/<vt:i4>(\d+)<\/vt:i4>/', $xml, $cantidades);
         $conservar = (int) ($cantidades[1][0] ?? 0) + (int) ($cantidades[1][1] ?? 0);
@@ -537,7 +690,7 @@ class GenerarPresentacionClase
         );
         $partes = array_merge($partes, $titulos);
         $xml = preg_replace('/<Slides>\d+<\/Slides>/', '<Slides>'.count($titulos).'</Slides>', $xml, 1) ?? $xml;
-        $xml = preg_replace('/<Notes>\d+<\/Notes>/', '<Notes>0</Notes>', $xml, 1) ?? $xml;
+        $xml = preg_replace('/<Notes>\d+<\/Notes>/', '<Notes>'.$notas.'</Notes>', $xml, 1) ?? $xml;
         $xml = preg_replace(
             '/(<vt:lpstr>(?:Títulos de diapositiva|Slide titles)<\/vt:lpstr><\/vt:variant><vt:variant><vt:i4>)\d+/',
             '${1}'.count($titulos),
@@ -556,6 +709,42 @@ class GenerarPresentacionClase
             $xml,
             1,
         ) ?? $xml;
+    }
+
+    /**
+     * Primera página de notas de la plantilla que tiene cuerpo, para usarla de molde.
+     */
+    private function baseNotas(ZipArchive $zip): ?string
+    {
+        for ($nota = 1; $nota <= 75; $nota++) {
+            $xml = $zip->getFromName('ppt/notesSlides/notesSlide'.$nota.'.xml');
+
+            if (is_string($xml) && preg_match('/<p:ph type="body"[^>]*\/>.*?<p:txBody>/s', $xml) === 1) {
+                return $xml;
+            }
+        }
+
+        return null;
+    }
+
+    private function notas(string $base, string $texto): string
+    {
+        $parrafos = '';
+
+        foreach (preg_split('/\R/u', $texto) ?: [] as $linea) {
+            $linea = trim($linea);
+
+            if ($linea !== '') {
+                $parrafos .= '<a:p><a:r><a:rPr lang="es-CL" dirty="0"/><a:t>'.$this->xml($linea).'</a:t></a:r></a:p>';
+            }
+        }
+
+        return preg_replace_callback(
+            '/(<p:ph type="body"[^>]*\/>.*?<p:txBody>).*?(<\/p:txBody>)/s',
+            fn (array $partes): string => $partes[1].'<a:bodyPr/><a:lstStyle/>'.$parrafos.$partes[2],
+            $base,
+            1,
+        ) ?? $base;
     }
 
     private function sinNotas(string $rels): string

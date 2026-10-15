@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Actions\AprenderProgramaModulo;
 use App\Actions\GenerarClasesAsignatura;
+use App\Actions\GenerarEvaluacionDiagnostica;
 use App\Actions\GenerarGuiaEstudio;
 use App\Actions\GenerarPlanificacion;
 use App\Actions\GenerarPresentacionClase;
@@ -13,6 +14,7 @@ use App\Actions\ResumenActividades;
 use App\Http\Requests\PrepararAsignaturaRequest;
 use App\Http\Requests\SubirPdfAsignaturaRequest;
 use App\Models\Asignatura;
+use App\Models\EvaluacionDiagnostica;
 use App\Models\GuiaEstudio;
 use App\Models\Presentacion;
 use Illuminate\Http\JsonResponse;
@@ -21,9 +23,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use ZipArchive;
 
 class AsignaturaController extends Controller
 {
@@ -34,6 +39,7 @@ class AsignaturaController extends Controller
         private GenerarPlanificacion $generarPlanificacion,
         private GenerarGuiaEstudio $generarGuia,
         private GenerarPresentacionClase $generarPresentacion,
+        private GenerarEvaluacionDiagnostica $generarEvaluacion,
     ) {}
 
     public function index(): View
@@ -223,7 +229,7 @@ class AsignaturaController extends Controller
     {
         Gate::authorize('view', $asignatura);
 
-        $asignatura->load(['clases', 'guias', 'presentaciones']);
+        $asignatura->load(['clases', 'guias', 'presentaciones', 'evaluacionesDiagnosticas']);
         $plan = $asignatura->planificacion ?? [];
         $bloquesPorFecha = collect($plan['calendario'] ?? [])->keyBy('fecha');
         $fechas = $asignatura->clases
@@ -251,6 +257,7 @@ class AsignaturaController extends Controller
             'dias' => $dias,
             'guias' => $asignatura->guias->keyBy(fn (GuiaEstudio $guia): string => $guia->fecha->toDateString().'|'.$guia->orden),
             'presentaciones' => $asignatura->presentaciones->keyBy(fn (Presentacion $presentacion): string => $presentacion->fecha->toDateString().'|'.$presentacion->orden),
+            'evaluaciones' => $asignatura->evaluacionesDiagnosticas->keyBy(fn (EvaluacionDiagnostica $evaluacion): string => $evaluacion->fecha->toDateString().'|'.$evaluacion->orden),
         ]);
     }
 
@@ -306,12 +313,87 @@ class AsignaturaController extends Controller
         ]);
     }
 
+    public function generarEvaluacionDiagnostica(Request $request, Asignatura $asignatura): JsonResponse
+    {
+        Gate::authorize('update', $asignatura);
+
+        $datos = $request->validate([
+            'fecha' => ['required', 'date_format:Y-m-d'],
+            'orden' => ['required', 'integer', 'min:1'],
+        ], [
+            'fecha.required' => 'Falta la fecha de la clase.',
+            'fecha.date_format' => 'La fecha de la clase no es válida.',
+            'orden.required' => 'Falta el bloque de la clase.',
+        ]);
+
+        try {
+            $evaluacion = $this->generarEvaluacion->handle($asignatura, $datos['fecha'], (int) $datos['orden']);
+        } catch (RuntimeException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'url' => route('asignaturas.evaluaciones.descargar', [$asignatura, $evaluacion]),
+        ]);
+    }
+
+    public function descargarEvaluacionDiagnostica(Asignatura $asignatura, EvaluacionDiagnostica $evaluacion): StreamedResponse
+    {
+        Gate::authorize('view', $asignatura);
+        abort_unless($evaluacion->asignatura_id === $asignatura->id && Storage::disk('local')->exists($evaluacion->archivo_path), 404);
+
+        return Storage::disk('local')->download($evaluacion->archivo_path, $evaluacion->archivo_nombre);
+    }
+
     public function descargarPresentacion(Asignatura $asignatura, Presentacion $presentacion): StreamedResponse
     {
         Gate::authorize('view', $asignatura);
         abort_unless($presentacion->asignatura_id === $asignatura->id && Storage::disk('local')->exists($presentacion->archivo_path), 404);
 
         return Storage::disk('local')->download($presentacion->archivo_path, $presentacion->archivo_nombre);
+    }
+
+    public function descargarPresentaciones(Asignatura $asignatura): BinaryFileResponse
+    {
+        Gate::authorize('view', $asignatura);
+
+        $clases = collect($asignatura->planificacion['calendario'] ?? [])
+            ->flatMap(fn (array $jornada): array => collect($jornada['bloques'] ?? [])
+                ->where('tipo', 'CLASE')
+                ->map(fn (array $bloque): string => $jornada['fecha'].'|'.($bloque['orden'] ?? 0))
+                ->all())
+            ->flip();
+
+        $presentaciones = $asignatura->presentaciones()
+            ->orderBy('fecha')
+            ->orderBy('orden')
+            ->get()
+            ->filter(fn (Presentacion $presentacion): bool => $clases->has($presentacion->fecha->toDateString().'|'.$presentacion->orden)
+                && Storage::disk('local')->exists($presentacion->archivo_path));
+
+        abort_if($presentaciones->isEmpty(), 404);
+
+        $destino = tempnam(sys_get_temp_dir(), 'presentaciones');
+        $zip = new ZipArchive;
+
+        if ($destino === false || $zip->open($destino, ZipArchive::OVERWRITE) !== true) {
+            abort(500, 'No se pudo preparar el archivo de presentaciones.');
+        }
+
+        foreach ($presentaciones->values() as $indice => $presentacion) {
+            $zip->addFile(
+                Storage::disk('local')->path($presentacion->archivo_path),
+                sprintf('%02d %s', $indice + 1, $presentacion->archivo_nombre),
+            );
+        }
+
+        $zip->close();
+
+        return response()
+            ->download($destino, 'Presentaciones '.Str::of($asignatura->nombre)->replaceMatches('/[\\\\\/:*?"<>|]+/', ' ')->squish().'.zip')
+            ->deleteFileAfterSend();
     }
 
     public function descargarGuia(Asignatura $asignatura, GuiaEstudio $guia): StreamedResponse

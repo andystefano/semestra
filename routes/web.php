@@ -35,7 +35,10 @@ Route::middleware('auth')->group(function () {
     Route::post('asignaturas/{asignatura}/planificacion/guias', [AsignaturaController::class, 'generarGuia'])->name('asignaturas.guias.generar');
     Route::get('asignaturas/{asignatura}/guias/{guia}/descargar', [AsignaturaController::class, 'descargarGuia'])->name('asignaturas.guias.descargar');
     Route::post('asignaturas/{asignatura}/planificacion/presentaciones', [AsignaturaController::class, 'generarPresentacion'])->name('asignaturas.presentaciones.generar');
+    Route::get('asignaturas/{asignatura}/presentaciones/descargar-todas', [AsignaturaController::class, 'descargarPresentaciones'])->name('asignaturas.presentaciones.descargar-todas');
     Route::get('asignaturas/{asignatura}/presentaciones/{presentacion}/descargar', [AsignaturaController::class, 'descargarPresentacion'])->name('asignaturas.presentaciones.descargar');
+    Route::post('asignaturas/{asignatura}/planificacion/evaluaciones-diagnosticas', [AsignaturaController::class, 'generarEvaluacionDiagnostica'])->name('asignaturas.evaluaciones.generar');
+    Route::get('asignaturas/{asignatura}/evaluaciones-diagnosticas/{evaluacion}/descargar', [AsignaturaController::class, 'descargarEvaluacionDiagnostica'])->name('asignaturas.evaluaciones.descargar');
     Route::get('asignaturas/{asignatura}/planificacion', [AsignaturaController::class, 'planificacion'])->name('asignaturas.planificacion');
     Route::get('asignaturas/{asignatura}/documento/descargar', [AsignaturaController::class, 'descargarPdf'])->name('asignaturas.documento.descargar');
     Route::get('asignaturas/{asignatura}/editar', [AsignaturaController::class, 'edit'])->name('asignaturas.edit');

@@ -87,4 +87,12 @@ class Asignatura extends Model
     {
         return $this->hasMany(Presentacion::class);
     }
+
+    /**
+     * @return HasMany<EvaluacionDiagnostica, $this>
+     */
+    public function evaluacionesDiagnosticas(): HasMany
+    {
+        return $this->hasMany(EvaluacionDiagnostica::class);
+    }
 }

@@ -95,14 +95,36 @@ final class CatalogoLayouts
         if ($tope <= 20 && $marca !== 'TITULO') {
             $lineas = preg_split('/\R/u', $valor) ?: [];
             $lineas = array_slice(array_map(
-                fn (string $linea): string => mb_substr(trim($linea), 0, 80),
+                fn (string $linea): string => self::cortar($linea, 80),
                 $lineas,
             ), 0, $tope);
 
             return implode("\n", $lineas);
         }
 
-        return mb_substr($valor, 0, max(1, $tope));
+        return self::cortar($valor, $tope);
+    }
+
+    /**
+     * Recorta al tope sin partir palabras y marca el corte con puntos suspensivos.
+     */
+    public static function cortar(string $texto, int $tope): string
+    {
+        $texto = trim($texto);
+        $tope = max(1, $tope);
+
+        if (mb_strlen($texto) <= $tope) {
+            return $texto;
+        }
+
+        $corte = mb_substr($texto, 0, $tope - 1);
+        $espacio = mb_strrpos($corte, ' ');
+
+        if ($espacio !== false && $espacio >= (int) ($tope * 0.6)) {
+            $corte = mb_substr($corte, 0, $espacio);
+        }
+
+        return rtrim($corte, " \t\n,;:.-").'…';
     }
 
     /**

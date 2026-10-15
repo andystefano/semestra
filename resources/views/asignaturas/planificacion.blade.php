@@ -45,6 +45,15 @@
             <div class="alert alert-warning">{{ $advertencia }}</div>
         @endforeach
 
+        <div class="d-flex justify-content-end mb-3">
+            <button type="button" id="generar-presentaciones-faltantes" class="btn btn-secondary" title="Genera una a una las presentaciones de las clases que todavía no tienen">
+                <i class="fal fa-presentation mr-1"></i> Generar presentaciones faltantes (<span class="cantidad">0</span>)
+            </button>
+            <a id="descargar-presentaciones" class="btn btn-outline-secondary ml-2 disabled" href="{{ route('asignaturas.presentaciones.descargar-todas', $asignatura) }}" aria-disabled="true" title="Descarga en un .zip todas las presentaciones generadas">
+                <i class="fal fa-file-archive mr-1"></i> Descargar todas las presentaciones (<span class="cantidad">0</span>)
+            </a>
+        </div>
+
         <style>
             #acordeon-planificacion .card-header .btn-link {
                 display: flex;
@@ -148,6 +157,19 @@
                                     @if (! empty($bloque['descripcion']))
                                         <div>{{ $bloque['descripcion'] }}</div>
                                     @endif
+                                    @if ($esClase && empty($bloque['unidad']))
+                                        @php
+                                            $clavePresentacion = $dia['fecha'].'|'.($bloque['orden'] ?? 0);
+                                            $presentacion = ($presentaciones ?? collect())->get($clavePresentacion);
+                                            $evaluacion = ($evaluaciones ?? collect())->get($clavePresentacion);
+                                        @endphp
+                                        <div class="mt-3 guia-acciones">
+                                            <button type="button" class="btn btn-sm btn-secondary generar-presentacion" data-fecha="{{ $dia['fecha'] }}" data-orden="{{ $bloque['orden'] ?? 1 }}">Generar presentación clase</button>
+                                            <a class="btn btn-sm btn-outline-secondary ml-1 descargar-presentacion {{ $presentacion ? '' : 'd-none' }}" href="{{ $presentacion ? route('asignaturas.presentaciones.descargar', [$asignatura, $presentacion]) : '#' }}">Descargar presentación</a>
+                                            <button type="button" class="btn btn-sm btn-warning ml-1 generar-evaluacion" data-fecha="{{ $dia['fecha'] }}" data-orden="{{ $bloque['orden'] ?? 1 }}">Generar evaluación Blackboard</button>
+                                            <a class="btn btn-sm btn-outline-warning ml-1 descargar-evaluacion {{ $evaluacion ? '' : 'd-none' }}" href="{{ $evaluacion ? route('asignaturas.evaluaciones.descargar', [$asignatura, $evaluacion]) : '#' }}">Descargar evaluación (QTI 2.1)</a>
+                                        </div>
+                                    @endif
                                     @if ($esClase && ! empty($bloque['unidad']))
                                         <p class="mt-2 mb-1"><strong>Aprendizaje esperado</strong><br>{{ $bloque['aprendizaje_esperado'] ?: '—' }}</p>
                                         <p class="mb-1"><strong>Criterios de evaluación</strong></p>
@@ -208,6 +230,8 @@
         <div class="text-center text-white">
             <div class="spinner-border" role="status"></div>
             <div id="mensaje-guia" class="mt-3">redactando la guía de estudios</div>
+            <div id="progreso-guia" class="mt-2 font-weight-bold d-none"></div>
+            <button type="button" id="detener-guia" class="btn btn-sm btn-outline-light mt-3 d-none">Detener después de esta clase</button>
         </div>
     </div>
     <div id="cargando-planificacion" class="d-none align-items-center justify-content-center" style="position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 2000;">
@@ -349,21 +373,205 @@
                 });
             });
 
+            var avisosPresentacion = [
+                'armando el contexto de la clase',
+                'agrupando los bloques conceptuales',
+                'definiendo el objetivo de cada bloque',
+                'eligiendo la estrategia',
+                'eligiendo los recursos',
+                'ordenando la estructura del bloque',
+                'redactando las diapositivas',
+                'ajustando el diseño',
+                'verificando el plan'
+            ];
+
+            function mostrarCarga(avisos) {
+                var cargando = document.getElementById('cargando-guia');
+                var mensaje = document.getElementById('mensaje-guia');
+                var indice = 0;
+                var reloj = setInterval(function () {
+                    indice = (indice + 1) % avisos.length;
+                    mensaje.textContent = avisos[indice];
+                }, 2500);
+
+                mensaje.textContent = avisos[0];
+                cargando.classList.remove('d-none');
+                cargando.classList.add('d-flex');
+
+                return function () {
+                    clearInterval(reloj);
+                    cargando.classList.remove('d-flex');
+                    cargando.classList.add('d-none');
+                };
+            }
+
+            function presentacionesFaltantes() {
+                return Array.prototype.filter.call(document.querySelectorAll('.generar-presentacion'), function (boton) {
+                    return boton.parentElement.querySelector('.descargar-presentacion').classList.contains('d-none');
+                });
+            }
+
+            function actualizarBotonPresentaciones() {
+                var boton = document.getElementById('generar-presentaciones-faltantes');
+                var descargar = document.getElementById('descargar-presentaciones');
+
+                if (! boton) {
+                    return;
+                }
+
+                var generadas = document.querySelectorAll('.descargar-presentacion:not(.d-none)').length;
+                descargar.querySelector('.cantidad').textContent = generadas;
+                descargar.classList.toggle('disabled', generandoLote || generadas === 0);
+                descargar.setAttribute('aria-disabled', generandoLote || generadas === 0 ? 'true' : 'false');
+
+                var faltantes = presentacionesFaltantes().length;
+                boton.querySelector('.cantidad').textContent = faltantes;
+                boton.disabled = generandoLote || faltantes === 0;
+            }
+
+            var generandoLote = false;
+
+            function generarPresentacion(boton) {
+                var acciones = boton.parentElement;
+
+                boton.disabled = true;
+
+                return fetch(@json(route('asignaturas.presentaciones.generar', $asignatura)), {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    },
+                    body: JSON.stringify({
+                        fecha: boton.dataset.fecha,
+                        orden: Number(boton.dataset.orden)
+                    })
+                }).then(function (respuesta) {
+                    return respuesta.text().then(function (texto) {
+                        var datos = {};
+                        try {
+                            datos = texto ? JSON.parse(texto) : {};
+                        } catch (e) {
+                            datos = { message: 'El servidor cortó la generación. Reinicia Laragon e inténtalo de nuevo.' };
+                        }
+                        return { ok: respuesta.ok, datos: datos };
+                    });
+                }).then(function (resultado) {
+                    if (! resultado.ok) {
+                        throw new Error(resultado.datos.message || 'No se pudo generar la presentación.');
+                    }
+
+                    var enlace = acciones.querySelector('.descargar-presentacion');
+                    enlace.href = resultado.datos.url;
+                    enlace.classList.remove('d-none');
+                }, function () {
+                    throw new Error('No se pudo generar la presentación.');
+                }).finally(function () {
+                    boton.disabled = false;
+                    actualizarBotonPresentaciones();
+                });
+            }
+
             document.querySelectorAll('.generar-presentacion').forEach(function (boton) {
+                boton.addEventListener('click', function () {
+                    var error = document.getElementById('error-planificacion');
+                    var ocultar = mostrarCarga(avisosPresentacion);
+
+                    error.classList.add('d-none');
+
+                    generarPresentacion(boton).catch(function (falla) {
+                        error.textContent = falla.message;
+                        error.classList.remove('d-none');
+                    }).finally(ocultar);
+                });
+            });
+
+            var botonFaltantes = document.getElementById('generar-presentaciones-faltantes');
+
+            if (botonFaltantes) {
+                actualizarBotonPresentaciones();
+
+                botonFaltantes.addEventListener('click', function () {
+                    var faltantes = presentacionesFaltantes();
+                    var error = document.getElementById('error-planificacion');
+                    var progreso = document.getElementById('progreso-guia');
+                    var detener = document.getElementById('detener-guia');
+                    var detenido = false;
+                    var fallas = [];
+                    var ocultar = mostrarCarga(avisosPresentacion);
+
+                    if (faltantes.length === 0) {
+                        ocultar();
+                        return;
+                    }
+
+                    generandoLote = true;
+                    botonFaltantes.disabled = true;
+                    error.classList.add('d-none');
+                    detener.disabled = false;
+                    detener.textContent = 'Detener después de esta clase';
+                    detener.classList.remove('d-none');
+                    detener.onclick = function () {
+                        detenido = true;
+                        detener.disabled = true;
+                        detener.textContent = 'Se detendrá al terminar esta clase';
+                    };
+
+                    var cadena = Promise.resolve();
+
+                    faltantes.forEach(function (boton, posicion) {
+                        cadena = cadena.then(function () {
+                            if (detenido) {
+                                return;
+                            }
+
+                            progreso.textContent = 'Presentación ' + (posicion + 1) + ' de ' + faltantes.length + ' · ' + boton.dataset.fecha.split('-').reverse().join('/');
+                            progreso.classList.remove('d-none');
+
+                            return generarPresentacion(boton).catch(function (falla) {
+                                fallas.push(boton.dataset.fecha.split('-').reverse().join('/') + ': ' + falla.message);
+                            });
+                        });
+                    });
+
+                    cadena.then(function () {
+                        generandoLote = false;
+                        ocultar();
+                        progreso.classList.add('d-none');
+                        detener.classList.add('d-none');
+                        detener.onclick = null;
+                        actualizarBotonPresentaciones();
+
+                        if (fallas.length > 0) {
+                            error.innerHTML = '';
+                            error.appendChild(document.createTextNode('No se pudieron generar ' + fallas.length + ' presentaciones:'));
+                            var lista = document.createElement('ul');
+                            lista.className = 'mb-0';
+                            fallas.forEach(function (falla) {
+                                var item = document.createElement('li');
+                                item.textContent = falla;
+                                lista.appendChild(item);
+                            });
+                            error.appendChild(lista);
+                            error.classList.remove('d-none');
+                            error.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    });
+                });
+            }
+
+            document.querySelectorAll('.generar-evaluacion').forEach(function (boton) {
                 boton.addEventListener('click', function () {
                     var cargando = document.getElementById('cargando-guia');
                     var mensaje = document.getElementById('mensaje-guia');
                     var error = document.getElementById('error-planificacion');
                     var avisos = [
-                        'armando el contexto de la clase',
-                        'agrupando los bloques conceptuales',
-                        'definiendo el objetivo de cada bloque',
-                        'eligiendo la estrategia',
-                        'eligiendo los recursos',
-                        'ordenando la estructura del bloque',
-                        'redactando las diapositivas',
-                        'ajustando el diseño',
-                        'verificando el plan'
+                        'revisando los módulos prerrequisito',
+                        'seleccionando contenidos de la primera unidad',
+                        'redactando preguntas de alternativas',
+                        'redactando ítems de verdadero o falso',
+                        'empaquetando en QTI 2.1 para Blackboard'
                     ];
                     var indice = 0;
                     var reloj = setInterval(function () {
@@ -378,7 +586,7 @@
                     cargando.classList.remove('d-none');
                     cargando.classList.add('d-flex');
 
-                    fetch(@json(route('asignaturas.presentaciones.generar', $asignatura)), {
+                    fetch(@json(route('asignaturas.evaluaciones.generar', $asignatura)), {
                         method: 'POST',
                         headers: {
                             'Accept': 'application/json',
@@ -401,16 +609,16 @@
                         });
                     }).then(function (resultado) {
                         if (! resultado.ok) {
-                            error.textContent = resultado.datos.message || 'No se pudo generar la presentación.';
+                            error.textContent = resultado.datos.message || 'No se pudo generar la evaluación diagnóstica.';
                             error.classList.remove('d-none');
                             return;
                         }
 
-                        var enlace = acciones.querySelector('.descargar-presentacion');
+                        var enlace = acciones.querySelector('.descargar-evaluacion');
                         enlace.href = resultado.datos.url;
                         enlace.classList.remove('d-none');
                     }).catch(function () {
-                        error.textContent = 'No se pudo generar la presentación.';
+                        error.textContent = 'No se pudo generar la evaluación diagnóstica.';
                         error.classList.remove('d-none');
                     }).finally(function () {
                         clearInterval(reloj);
